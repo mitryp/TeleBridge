@@ -36,6 +36,19 @@ public class Config {
     private static final ForgeConfigSpec.BooleanValue SERVICE_START_STOP = BUILDER
             .comment("Forward server start/stop").define("service.start_stop", true);
 
+    // add near your existing fields
+    private static final ForgeConfigSpec.BooleanValue INBOUND_ENABLED = BUILDER
+            .comment("Receive messages from Telegram and relay to Minecraft")
+            .define("telegram.inbound.enabled", false);
+
+    private static final ForgeConfigSpec.IntValue INBOUND_POLL_SECONDS = BUILDER
+            .comment("Long-poll timeout (1..50)")
+            .defineInRange("telegram.inbound.poll_seconds", 20, 1, 50);
+
+    private static final ForgeConfigSpec.ConfigValue<String> INBOUND_CMD_PREFIX = BUILDER
+            .comment("Prefix for Telegram commands (usually '/')")
+            .define("telegram.inbound.prefix", "/");
+
     static final ForgeConfigSpec SPEC = BUILDER.build();
 
     // Resolved values
@@ -49,6 +62,9 @@ public class Config {
     public static boolean serviceDeaths;
     public static boolean serviceStartStop;
 
+    public static boolean inboundEnabled;
+    public static int inboundPollSeconds;
+    public static String inboundCmdPrefix;
 
     @SubscribeEvent
     static void onLoad(final ModConfigEvent event) {
@@ -61,5 +77,9 @@ public class Config {
         serviceJoinQuit = SERVICE_JOIN_QUIT.get();
         serviceDeaths = SERVICE_DEATHS.get();
         serviceStartStop = SERVICE_START_STOP.get();
+
+        inboundEnabled = INBOUND_ENABLED.get();
+        inboundPollSeconds = INBOUND_POLL_SECONDS.get();
+        inboundCmdPrefix = INBOUND_CMD_PREFIX.get();
     }
 }

@@ -1,6 +1,11 @@
 package dev.mitryp.telebridge;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.mojang.logging.LogUtils;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.ServerChatEvent;
@@ -12,9 +17,12 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.config.ModConfig;
+import net.minecraftforge.server.ServerLifecycleHooks;
+import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -22,6 +30,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Mod(Telebridge.MODID)
 public class Telebridge {
@@ -38,6 +47,9 @@ public class Telebridge {
             },
             new ThreadPoolExecutor.DiscardOldestPolicy()
     );
+
+    private static final AtomicBoolean POLLER_RUNNING = new AtomicBoolean(false);
+    private static Thread pollerThread;
 
     public Telebridge() {
         // Register config (Forge will create config/telebridge-common.toml)
@@ -100,14 +112,124 @@ public class Telebridge {
 
     @SubscribeEvent
     public void onServerStarting(ServerStartingEvent e) {
-        if (!Config.telegramEnabled || !Config.serviceStartStop) return;
-        sendService("> Server starting");
+        if (Config.telegramEnabled && Config.serviceStartStop) {
+            sendService("> Server starting");
+        }
+
+        if (Config.inboundEnabled && pollerThread == null) {
+            POLLER_RUNNING.set(true);
+            pollerThread = new Thread(Telebridge::runPoller, "TeleBridge-Poller");
+            pollerThread.setDaemon(true);
+            pollerThread.start();
+            LOGGER.info("[TeleBridge] Inbound poller started.");
+        }
     }
 
     @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent e) {
-        if (!Config.telegramEnabled || !Config.serviceStartStop) return;
-        sendService("> Server stopping");
+        if (Config.telegramEnabled && Config.serviceStartStop) {
+            sendService("> Server stopping");
+        }
+
+        POLLER_RUNNING.set(false);
+        if (pollerThread != null) {
+            pollerThread.interrupt();
+            pollerThread = null;
+        }
+        LOGGER.info("[TeleBridge] Inbound poller stopped.");
+    }
+
+    /* --- Poller loop --- */
+    private static void runPoller() {
+        long offset = 0; // Telegram update offset
+        Gson gson = new Gson();
+
+        while (POLLER_RUNNING.get()) {
+            try {
+                // build long-poll URL
+                HttpURLConnection conn = getHttpURLConnection(offset);
+
+                int code = conn.getResponseCode();
+                if (code / 100 == 2) {
+                    try (var r = new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8)) {
+                        JsonObject obj = gson.fromJson(r, JsonObject.class);
+                        if (obj != null && obj.has("ok") && obj.get("ok").getAsBoolean() && obj.has("result")) {
+                            JsonArray arr = obj.getAsJsonArray("result");
+                            for (JsonElement el : arr) {
+                                JsonObject up = el.getAsJsonObject();
+                                long updateId = up.get("update_id").getAsLong();
+                                offset = updateId + 1;
+
+                                if (!up.has("message")) continue;
+                                JsonObject msg = up.getAsJsonObject("message");
+
+                                // chat filter
+                                JsonObject chat = msg.getAsJsonObject("chat");
+                                String chatIdStr = chat.get("id").getAsLong() + "";
+                                if (!chatIdStr.equals(Config.telegramChatId)) continue;
+
+                                // text only
+                                if (!msg.has("text")) continue;
+                                String text = msg.get("text").getAsString();
+
+                                // sender info
+                                JsonObject from = msg.getAsJsonObject("from");
+                                String tgUsername = from.has("username") ? from.get("username").getAsString() : null;
+                                String display = from.has("first_name") ? from.get("first_name").getAsString() : "TG";
+                                if (from.has("last_name"))
+                                    display = display + " " + from.get("last_name").getAsString();
+
+                                // Command handling: /say
+                                String prefix = Config.inboundCmdPrefix == null ? "/" : Config.inboundCmdPrefix;
+                                if (text.startsWith(prefix + "say ")) {
+                                    String payload = text.substring((prefix + "say ").length()).trim();
+                                    if (!payload.isEmpty()) {
+                                        // Prefer MC name if linked
+                                        String mc = TgLinks.resolveMcFromTg(tgUsername);
+                                        String nameForMc = (mc != null) ? mc : (tgUsername != null ? "@" + tgUsername : display);
+
+                                        broadcastToMc("[" + nameForMc + "] " + payload);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // non-2xx -> small backoff
+                    Thread.sleep(2000);
+                }
+                conn.disconnect();
+            } catch (InterruptedException ie) {
+                // stopping
+            } catch (Exception ex) {
+                // network hiccup -> brief backoff
+                try {
+                    Thread.sleep(2000);
+                } catch (InterruptedException ignored) {
+                }
+            }
+        }
+    }
+
+    private static @NotNull HttpURLConnection getHttpURLConnection(long offset) throws IOException {
+        String url = "https://api.telegram.org/bot" + Config.telegramBotToken +
+                "/getUpdates?timeout=" + Config.inboundPollSeconds +
+                "&allowed_updates=message";
+        if (offset > 0) url += "&offset=" + offset;
+
+        HttpURLConnection conn = (HttpURLConnection) new java.net.URL(url).openConnection();
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(5000);
+        conn.setReadTimeout((Config.inboundPollSeconds + 5) * 1000);
+        return conn;
+    }
+
+    private static void broadcastToMc(String message) {
+        var server = ServerLifecycleHooks.getCurrentServer();
+        if (server == null) return;
+        server.execute(() -> {
+            server.getPlayerList().broadcastSystemMessage(Component.literal(message), false);
+        });
     }
 
     /* ------------ Telegram helpers (no extra deps) ------------ */
