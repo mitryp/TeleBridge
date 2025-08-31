@@ -6,7 +6,9 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.mojang.logging.LogUtils;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.ServerChatEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
@@ -74,7 +76,7 @@ public class Telebridge {
 
         TELE_EXEC.submit(() -> {
             try {
-                sendTelegram(text, Config.telegramUseMarkdownV2 ? "MarkdownV2" : null);
+                sendService(text);
             } catch (Exception e) {
                 logException(e);
             }
@@ -150,54 +152,52 @@ public class Telebridge {
                 HttpURLConnection conn = getHttpURLConnection(offset);
 
                 int code = conn.getResponseCode();
-                if (code / 100 == 2) {
-                    try (var r = new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8)) {
-                        JsonObject obj = gson.fromJson(r, JsonObject.class);
-                        if (obj != null && obj.has("ok") && obj.get("ok").getAsBoolean() && obj.has("result")) {
-                            JsonArray arr = obj.getAsJsonArray("result");
-                            for (JsonElement el : arr) {
-                                JsonObject up = el.getAsJsonObject();
-                                long updateId = up.get("update_id").getAsLong();
-                                offset = updateId + 1;
-
-                                if (!up.has("message")) continue;
-                                JsonObject msg = up.getAsJsonObject("message");
-
-                                // chat filter
-                                JsonObject chat = msg.getAsJsonObject("chat");
-                                String chatIdStr = chat.get("id").getAsLong() + "";
-                                if (!chatIdStr.equals(Config.telegramChatId)) continue;
-
-                                // text only
-                                if (!msg.has("text")) continue;
-                                String text = msg.get("text").getAsString();
-
-                                // sender info
-                                JsonObject from = msg.getAsJsonObject("from");
-                                String tgUsername = from.has("username") ? from.get("username").getAsString() : null;
-                                String display = from.has("first_name") ? from.get("first_name").getAsString() : "TG";
-                                if (from.has("last_name"))
-                                    display = display + " " + from.get("last_name").getAsString();
-
-                                // Command handling: /say
-                                String prefix = Config.inboundCmdPrefix == null ? "/" : Config.inboundCmdPrefix;
-                                if (text.startsWith(prefix + "say ")) {
-                                    String payload = text.substring((prefix + "say ").length()).trim();
-                                    if (!payload.isEmpty()) {
-                                        // Prefer MC name if linked
-                                        String mc = TgLinks.resolveMcFromTg(tgUsername);
-                                        String nameForMc = (mc != null) ? mc : (tgUsername != null ? "@" + tgUsername : display);
-
-                                        broadcastToMc("[" + nameForMc + "] " + payload);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else {
+                if (code / 100 != 2) {
                     // non-2xx -> small backoff
                     Thread.sleep(2000);
+                    conn.disconnect();
+                    continue;
                 }
+
+                try (var r = new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8)) {
+                    JsonObject obj = gson.fromJson(r, JsonObject.class);
+                    if (obj == null || !obj.has("ok") || !obj.get("ok").getAsBoolean() || !obj.has("result")) {
+                        conn.disconnect();
+                        continue;
+                    }
+
+                    JsonArray arr = obj.getAsJsonArray("result");
+                    for (JsonElement el : arr) {
+                        JsonObject up = el.getAsJsonObject();
+                        long updateId = up.get("update_id").getAsLong();
+                        offset = updateId + 1;
+
+                        if (!up.has("message")) continue;
+                        JsonObject msg = up.getAsJsonObject("message");
+
+                        // chat filter
+                        JsonObject chat = msg.getAsJsonObject("chat");
+                        String chatIdStr = chat.get("id").getAsLong() + "";
+                        if (!chatIdStr.equals(Config.telegramChatId)) continue;
+
+                        // text only
+                        if (!msg.has("text")) continue;
+                        String text = msg.get("text").getAsString();
+
+                        // sender info
+                        JsonObject from = msg.getAsJsonObject("from");
+                        String tgUsername = from.has("username") ? from.get("username").getAsString() : null;
+                        String display = from.has("first_name") ? from.get("first_name").getAsString() : "TG";
+                        if (from.has("last_name"))
+                            display = display + " " + from.get("last_name").getAsString();
+
+                        int messageId = msg.get("message_id").getAsInt();
+                        Integer threadId = (msg.has("message_thread_id") ? msg.get("message_thread_id").getAsInt() : null);
+
+                        handleTelegramCommand(text, tgUsername, display, messageId, threadId);
+                    }
+                }
+
                 conn.disconnect();
             } catch (InterruptedException ie) {
                 // stopping
@@ -232,22 +232,89 @@ public class Telebridge {
         });
     }
 
+    // Decide which name to show in MC for a Telegram sender.
+    // Prefers linked MC name, then @username, then the display name we got from Telegram.
+    private static String resolveEffectiveName(String tgUsernameOrNull, String displayName) {
+        String linked = TgLinks.resolveMcFromTg(tgUsernameOrNull);
+        if (linked != null && !linked.isBlank()) return linked;
+        if (tgUsernameOrNull != null && !tgUsernameOrNull.isBlank()) return "@" + tgUsernameOrNull;
+        return displayName != null && !displayName.isBlank() ? displayName : "TG";
+    }
+
+    // Centralized command handler for Telegram messages.
+    // text = full message text from Telegram
+    // displayName = already-built human-readable display name ("First Last", etc.)
+    private static void handleTelegramCommand(String text, String tgUsernameOrNull, String displayName, Integer replyMessageId, Integer threadId) {
+        // Normalize
+        if (text == null || text.isBlank()) return;
+        String prefix = (Config.inboundCmdPrefix == null || Config.inboundCmdPrefix.isBlank()) ? "/" : Config.inboundCmdPrefix;
+
+        if (!text.startsWith(prefix)) {
+            return; // not a command; ignore (or you could forward plain messages if you want)
+        }
+
+        // Simple split: "/cmd args…"
+        String withoutPrefix = text.substring(prefix.length()).trim();
+        int sp = withoutPrefix.indexOf(' ');
+        String cmd = (sp == -1 ? withoutPrefix : withoutPrefix.substring(0, sp)).toLowerCase();
+        String args = (sp == -1 ? "" : withoutPrefix.substring(sp + 1)).trim();
+
+        switch (cmd) {
+            case "say" -> handleSayCommand(args, tgUsernameOrNull, displayName);
+            case "online" -> handleOnlineCommand(replyMessageId, threadId);
+
+            // add new commands here:
+            // case "tps" -> { /* compute & broadcast TPS */ }
+            // case "list" -> { /* list online players */ }
+            // case "whisper" -> { /* /whisper <mcName> <msg> */ }
+            // default: (optional) broadcast or ignore unknown commands
+            default -> {
+                // Optional feedback to MC or Telegram; currently we ignore unknown commands.
+            }
+        }
+    }
+
+    private static void handleSayCommand(String message, String tgUsernameOrNull, String displayName) {
+        if (message.isEmpty()) {
+            return;
+        }
+
+        String nameForMc = resolveEffectiveName(tgUsernameOrNull, displayName);
+        broadcastToMc("[" + nameForMc + "] " + message);
+    }
+
+    private static void handleOnlineCommand(Integer replyMessageId, Integer threadId) {
+        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+
+        var players = server.getPlayerList().getPlayers();
+        var names = players.stream().map(Player::getName).map(Component::getString).toList();
+
+        var repr = "Current online:\n" +
+                String.join("\n", names);
+
+        sendService(repr, replyMessageId, threadId);
+    }
+
     /* ------------ Telegram helpers (no extra deps) ------------ */
 
-    private static void sendService(String plainText) {
+    private static void sendService(String plainText, Integer replyMessageId, Integer threadId) {
         if (Config.telegramBotToken.isBlank() || Config.telegramChatId.isBlank()) return;
         String text = Config.telegramUseMarkdownV2 ? escapeMarkdownV2(plainText) : plainText;
 
         TELE_EXEC.submit(() -> {
             try {
-                sendTelegram(text, Config.telegramUseMarkdownV2 ? "MarkdownV2" : null);
+                sendTelegram(text, Config.telegramUseMarkdownV2 ? "MarkdownV2" : null, replyMessageId, threadId);
             } catch (Exception e) {
                 logException(e);
             }
         });
     }
 
-    private static void sendTelegram(String text, String parseMode) throws IOException {
+    private static void sendService(String plainText) {
+        sendService(plainText, null, null);
+    }
+
+    private static void sendTelegram(String text, String parseMode, Integer replyMessageId, Integer threadId) throws IOException {
         String url = "https://api.telegram.org/bot" + Config.telegramBotToken + "/sendMessage";
 
         StringBuilder body = new StringBuilder();
@@ -256,6 +323,16 @@ public class Telebridge {
         if (parseMode != null) {
             body.append("&parse_mode=").append(URLEncoder.encode(parseMode, StandardCharsets.UTF_8));
             body.append("&disable_web_page_preview=true");
+        }
+
+        if (replyMessageId != null) {
+            body.append("&reply_to_message_id=").append(URLEncoder.encode(String.valueOf(replyMessageId), StandardCharsets.UTF_8));
+            // Optional: allow sending even if the original was deleted
+            body.append("&allow_sending_without_reply=true");
+        }
+
+        if (threadId != null) {
+            body.append("&message_thread_id=").append(URLEncoder.encode(String.valueOf(threadId), StandardCharsets.UTF_8));
         }
 
         byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
