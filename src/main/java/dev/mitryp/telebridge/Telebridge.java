@@ -299,11 +299,10 @@ public class Telebridge {
 
     private static void sendService(String plainText, Integer replyMessageId, Integer threadId) {
         if (Config.telegramBotToken.isBlank() || Config.telegramChatId.isBlank()) return;
-        String text = Config.telegramUseMarkdownV2 ? escapeMarkdownV2(plainText) : plainText;
 
         TELE_EXEC.submit(() -> {
             try {
-                sendTelegram(text, Config.telegramUseMarkdownV2 ? "MarkdownV2" : null, replyMessageId, threadId);
+                sendTelegram(plainText, Config.telegramUseMarkdownV2 ? "MarkdownV2" : null, replyMessageId, threadId);
             } catch (Exception e) {
                 logException(e);
             }
@@ -362,6 +361,9 @@ public class Telebridge {
             if (specials.indexOf(c) >= 0) out.append('\\');
             out.append(c);
         }
+
+        LOGGER.info("Escaped: " + out);
+
         return out.toString();
     }
 
