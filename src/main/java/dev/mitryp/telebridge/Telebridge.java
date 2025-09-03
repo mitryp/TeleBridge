@@ -280,14 +280,14 @@ public class Telebridge {
         }
 
         String nameForMc = resolveEffectiveName(tgUsernameOrNull, displayName);
-        broadcastToMc("[" + nameForMc + "] " + message);
+        broadcastToMc("[" + escapeMarkdownV2(nameForMc) + "] " + message);
     }
 
     private static void handleOnlineCommand(Integer replyMessageId, Integer threadId) {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
 
         var players = server.getPlayerList().getPlayers();
-        var names = players.stream().map(Player::getName).map(Component::getString).toList();
+        var names = players.stream().map(Player::getName).map(Component::getString).map(Telebridge::escapeMarkdownV2).toList();
 
         var repr = "Current online:\n" +
                 String.join("\n", names);
@@ -361,8 +361,6 @@ public class Telebridge {
             if (specials.indexOf(c) >= 0) out.append('\\');
             out.append(c);
         }
-
-        LOGGER.info("Escaped: " + out);
 
         return out.toString();
     }
