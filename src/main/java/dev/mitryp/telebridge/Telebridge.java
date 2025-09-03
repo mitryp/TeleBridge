@@ -16,9 +16,9 @@ import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.server.ServerStartingEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.config.ModConfig;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.server.ServerLifecycleHooks;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
@@ -53,9 +53,9 @@ public class Telebridge {
     private static final AtomicBoolean POLLER_RUNNING = new AtomicBoolean(false);
     private static Thread pollerThread;
 
-    public Telebridge() {
+    public Telebridge(FMLJavaModLoadingContext context) {
         // Register config (Forge will create config/telebridge-common.toml)
-        ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, Config.SPEC);
+        context.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
 
         // Subscribe to game events
         MinecraftForge.EVENT_BUS.register(this);
