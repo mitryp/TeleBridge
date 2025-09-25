@@ -72,7 +72,7 @@ public class Telebridge {
         String rawMsg = event.getMessage().getString();
 
         String line = "<" + playerName + "> " + rawMsg;
-        String text = Config.telegramUseMarkdownV2 ? escapeMarkdownV2(line) : line;
+        String text = escapeMarkdownIfConfigured(line);
 
         TELE_EXEC.submit(() -> {
             try {
@@ -86,14 +86,14 @@ public class Telebridge {
     @SubscribeEvent
     public void onPlayerJoin(PlayerEvent.PlayerLoggedInEvent event) {
         if (!Config.telegramEnabled || !Config.serviceJoinQuit) return;
-        String name = event.getEntity().getName().getString();
+        String name = escapeMarkdownIfConfigured(event.getEntity().getName().getString());
         sendService("> " + name + " joined the game");
     }
 
     @SubscribeEvent
     public void onPlayerQuit(PlayerEvent.PlayerLoggedOutEvent event) {
         if (!Config.telegramEnabled || !Config.serviceJoinQuit) return;
-        String name = event.getEntity().getName().getString();
+        String name = escapeMarkdownIfConfigured(event.getEntity().getName().getString());
         sendService("> " + name + " left the game");
     }
 
@@ -109,7 +109,7 @@ public class Telebridge {
             String cause = event.getSource() != null ? event.getSource().getMsgId() : "unknown";
             deathMsg = name + " died (" + cause + ")";
         }
-        sendService("> " + deathMsg);
+        sendService("> " + escapeMarkdownIfConfigured(deathMsg));
     }
 
     @SubscribeEvent
@@ -287,7 +287,11 @@ public class Telebridge {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
 
         var players = server.getPlayerList().getPlayers();
-        var names = players.stream().map(Player::getName).map(Component::getString).map(Telebridge::escapeMarkdownV2).toList();
+        var names = players.stream()
+                .map(Player::getName)
+                .map(Component::getString)
+                .map(Telebridge::escapeMarkdownIfConfigured)
+                .toList();
 
         var repr = "Current online:\n" +
                 String.join("\n", names);
@@ -351,6 +355,10 @@ public class Telebridge {
             throw new IOException("Telegram HTTP " + code + " " + err);
         }
         conn.disconnect();
+    }
+
+    private static String escapeMarkdownIfConfigured(String s) {
+        return Config.telegramUseMarkdownV2 ? escapeMarkdownV2(s) : s;
     }
 
     private static String escapeMarkdownV2(String s) {
