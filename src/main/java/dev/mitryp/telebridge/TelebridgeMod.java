@@ -1,6 +1,7 @@
 package dev.mitryp.telebridge;
 
 import com.mojang.logging.LogUtils;
+import dev.mitryp.telebridge.application.mc.AdvancementAnnouncer;
 import dev.mitryp.telebridge.application.mc.ForgeMinecraftBridge;
 import dev.mitryp.telebridge.application.mc.commands.TgUnlinkCommand;
 import dev.mitryp.telebridge.application.mc.commands.TglinkCommand;
@@ -20,9 +21,16 @@ import dev.mitryp.telebridge.domain.interfaces.MinecraftBridge;
 import dev.mitryp.telebridge.domain.interfaces.TelegramGateway;
 import dev.mitryp.telebridge.domain.models.TelebridgeSpec;
 import dev.mitryp.telebridge.utils.TelebridgePaths;
+import net.minecraft.advancements.DisplayInfo;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.TranslatableContents;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.GameRules;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.ServerChatEvent;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
+import net.minecraftforge.event.entity.player.AdvancementEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.server.ServerStartingEvent;
 import net.minecraftforge.event.server.ServerStoppedEvent;
@@ -47,6 +55,7 @@ public class TelebridgeMod {
     private final NameResolver nameResolver;
     private final InboundCommandRouter router;
     private final TelegramPoller poller;
+    private final AdvancementAnnouncer advancements;
 
     public TelebridgeMod(FMLJavaModLoadingContext context) {
         // Load Forge config
@@ -57,6 +66,7 @@ public class TelebridgeMod {
         this.sender = new TelegramSender(api, TelebridgeConfigHolder::get);
         this.telegram = new TelegramHttpGateway(TelebridgeConfigHolder::get, api, sender);
         this.mc = new ForgeMinecraftBridge();
+        this.advancements = new AdvancementAnnouncer(telegram);
         this.links = new JsonLinkRepository(TelebridgePaths.linksFile());
         this.nameResolver = new NameResolver(links);
         PendingPrompts prompts = new PendingPrompts();
@@ -98,10 +108,39 @@ public class TelebridgeMod {
 
     @SubscribeEvent
     public void onPlayerQuit(PlayerEvent.PlayerLoggedOutEvent e) {
+        String name = e.getEntity().getName().getString();
+        advancements.flush(name);
         var cfg = TelebridgeConfigHolder.get();
         if (cfg.telegramEnabled && cfg.serviceJoinQuit && cfg.hasOutbound()) {
-            telegram.sendService("> " + e.getEntity().getName().getString() + " left the game");
+            String reason = e.getEntity() instanceof ServerPlayer sp ? disconnectReason(sp) : null;
+            telegram.sendService("> " + name + " left the game" + (reason == null ? "" : " (" + reason + ")"));
         }
+    }
+
+    /** Null for an ordinary quit. */
+    private static String disconnectReason(ServerPlayer sp) {
+        if (sp.connection == null) return null;
+        Component reason = sp.connection.connection.getDisconnectedReason();
+        if (reason == null) return null;
+        if (reason.getContents() instanceof TranslatableContents t && t.getKey().equals("disconnect.disconnected")) return null;
+        return reason.getString();
+    }
+
+    @SubscribeEvent
+    public void onAdvancement(AdvancementEvent.AdvancementEarnEvent e) {
+        var cfg = TelebridgeConfigHolder.get();
+        if (!(cfg.telegramEnabled && cfg.serviceAdvancements && cfg.hasOutbound())) return;
+        if (!(e.getEntity() instanceof ServerPlayer sp)) return;
+
+        DisplayInfo display = e.getAdvancement().getDisplay();
+        if (display == null || !display.shouldAnnounceChat()) return;
+        if (!sp.serverLevel().getGameRules().getBoolean(GameRules.RULE_ANNOUNCE_ADVANCEMENTS)) return;
+        advancements.add(sp.getName().getString(), display);
+    }
+
+    @SubscribeEvent
+    public void onServerTick(TickEvent.ServerTickEvent e) {
+        if (e.phase == TickEvent.Phase.END) advancements.flushDue();
     }
 
     @SubscribeEvent
@@ -130,6 +169,7 @@ public class TelebridgeMod {
 
     @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent e) {
+        advancements.flushAll();
         var cfg = TelebridgeConfigHolder.get();
         if (cfg.telegramEnabled && cfg.serviceStartStop && cfg.hasOutbound()) {
             telegram.sendService("> Server stopping");
