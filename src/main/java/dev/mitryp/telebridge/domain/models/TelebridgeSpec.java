@@ -7,6 +7,8 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.event.config.ModConfigEvent;
 
+import java.util.List;
+
 @Mod.EventBusSubscriber(modid = TelebridgeMod.MODID, bus = Mod.EventBusSubscriber.Bus.MOD)
 public final class TelebridgeSpec {
     private static final ForgeConfigSpec.Builder B = new ForgeConfigSpec.Builder();
@@ -28,6 +30,10 @@ public final class TelebridgeSpec {
     static final ForgeConfigSpec.BooleanValue INBOUND_ENABLED = B.comment("Enable inbound commands from Telegram").define("telegram.inbound.enabled", false);
     static final ForgeConfigSpec.IntValue INBOUND_POLL_SECONDS = B.comment("Long-poll timeout (1..50)").defineInRange("telegram.inbound.poll_seconds", 20, 1, 50);
     static final ForgeConfigSpec.ConfigValue<String> INBOUND_CMD_PREFIX = B.comment("Command prefix").define("telegram.inbound.prefix", "/");
+
+    // Admin
+    static final ForgeConfigSpec.ConfigValue<List<? extends Number>> ADMIN_USER_IDS = B.comment("Telegram user ids allowed to run admin commands")
+            .defineListAllowEmpty("telegram.admin.user_ids", List.of(), o -> o instanceof Number);
 
     public static final ForgeConfigSpec SPEC = B.build();
 
