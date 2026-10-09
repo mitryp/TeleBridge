@@ -18,6 +18,16 @@ public final class ForgeMinecraftBridge implements MinecraftBridge {
     }
 
     @Override
+    public void tell(String playerName, String message) {
+        var server = ServerLifecycleHooks.getCurrentServer();
+        if (server == null) return;
+        server.execute(() -> {
+            ServerPlayer player = server.getPlayerList().getPlayerByName(playerName);
+            if (player != null) player.sendSystemMessage(Component.literal(message));
+        });
+    }
+
+    @Override
     public List<String> onlineNames() {
         MinecraftServer srv = ServerLifecycleHooks.getCurrentServer();
         if (srv == null) return List.of();

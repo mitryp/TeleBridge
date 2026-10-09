@@ -1,15 +1,16 @@
 package dev.mitryp.telebridge.domain.interfaces;
 
+import dev.mitryp.telebridge.domain.models.TelegramLink;
+
 public interface LinkRepository {
-    String resolveMcFromTg(String tgUserOrNull);
+    /** Upgrades a legacy username link to this user id on first sight. */
+    TelegramLink findByTg(long tgUserId, String tgUsernameOrNull);
 
-    void link(String tgUsername, String mcName);
+    TelegramLink findByMc(String mcName);
 
-    String unlinkByMc(String mcName);
+    void link(long tgUserId, String tgUsernameOrNull, String mcName);
 
-    String findTgByMc(String mcName);
+    TelegramLink unlinkByTg(long tgUserId, String tgUsernameOrNull);
 
-    default boolean isLinked(String tgUsername) {
-        return resolveMcFromTg(tgUsername) != null;
-    }
+    TelegramLink unlinkByMc(String mcName);
 }

@@ -5,6 +5,7 @@ import dev.mitryp.telebridge.application.mc.AdvancementAnnouncer;
 import dev.mitryp.telebridge.application.mc.ForgeMinecraftBridge;
 import dev.mitryp.telebridge.application.mc.commands.TgUnlinkCommand;
 import dev.mitryp.telebridge.application.mc.commands.TglinkCommand;
+import dev.mitryp.telebridge.application.services.LinkCodes;
 import dev.mitryp.telebridge.application.services.NameResolver;
 import dev.mitryp.telebridge.application.telegram.InboundCommandRouter;
 import dev.mitryp.telebridge.application.telegram.PendingPrompts;
@@ -12,8 +13,10 @@ import dev.mitryp.telebridge.application.telegram.TelegramApi;
 import dev.mitryp.telebridge.application.telegram.TelegramHttpGateway;
 import dev.mitryp.telebridge.application.telegram.TelegramPoller;
 import dev.mitryp.telebridge.application.telegram.TelegramSender;
+import dev.mitryp.telebridge.application.telegram.commands.LinkCommand;
 import dev.mitryp.telebridge.application.telegram.commands.OnlineCommand;
 import dev.mitryp.telebridge.application.telegram.commands.SayCommand;
+import dev.mitryp.telebridge.application.telegram.commands.UnlinkCommand;
 import dev.mitryp.telebridge.data.config.TelebridgeConfigHolder;
 import dev.mitryp.telebridge.data.repositories.JsonLinkRepository;
 import dev.mitryp.telebridge.domain.interfaces.LinkRepository;
@@ -69,19 +72,22 @@ public class TelebridgeMod {
         this.advancements = new AdvancementAnnouncer(telegram);
         this.links = new JsonLinkRepository(TelebridgePaths.linksFile());
         this.nameResolver = new NameResolver(links);
-        PendingPrompts prompts = new PendingPrompts();
+        LinkCodes linkCodes = new LinkCodes();
+        PendingPrompts prompts = new PendingPrompts(telegram);
 
         // Commands available to Telegram
         this.router = new InboundCommandRouter(prompts)
-                .register("say", new SayCommand(mc, nameResolver, telegram, prompts))
-                .register("online", new OnlineCommand(mc, telegram));
+                .register("say", new SayCommand(mc, nameResolver, prompts))
+                .register("online", new OnlineCommand(mc, telegram))
+                .register("link", new LinkCommand(links, linkCodes, mc, telegram, prompts))
+                .register("unlink", new UnlinkCommand(links, telegram));
 
         // Inbound poller (Telegram -> MC)
         this.poller = new TelegramPoller(telegram, router, TelebridgeConfigHolder::get);
 
         // Event bus
         MinecraftForge.EVENT_BUS.register(this);
-        MinecraftForge.EVENT_BUS.register(new TglinkCommand(links));
+        MinecraftForge.EVENT_BUS.register(new TglinkCommand(links, linkCodes));
         MinecraftForge.EVENT_BUS.register(new TgUnlinkCommand(links));
 
         LOGGER.info("[TeleBridge] Loaded. Telegram bridge {}.",
