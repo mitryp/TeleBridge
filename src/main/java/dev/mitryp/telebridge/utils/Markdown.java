@@ -1,5 +1,8 @@
 package dev.mitryp.telebridge.utils;
 
+import java.util.Arrays;
+import java.util.stream.Collectors;
+
 public final class Markdown {
     private static final String SPECIALS = "_*[]()~`>#+-=|{}.!";
 
@@ -14,13 +17,12 @@ public final class Markdown {
     }
 
     /**
-     * Escape as MarkdownV2 but preserve a leading "> " so Telegram renders it as a quote.
+     * Escape as MarkdownV2 but preserve a leading "> " on each line so Telegram renders it as a quote.
      */
     public static String escapeV2ServiceAware(String s) {
         if (s == null || s.isEmpty()) return s;
-        if (s.startsWith("> ")) {
-            return "> " + escapeV2(s.substring(2));
-        }
-        return escapeV2(s);
+        return Arrays.stream(s.split("\n", -1))
+                .map(line -> line.startsWith("> ") ? "> " + escapeV2(line.substring(2)) : escapeV2(line))
+                .collect(Collectors.joining("\n"));
     }
 }
