@@ -1,6 +1,8 @@
 package dev.mitryp.telebridge.application.services;
 
 import dev.mitryp.telebridge.domain.interfaces.LinkRepository;
+import dev.mitryp.telebridge.domain.models.TelegramInboundMessage;
+import dev.mitryp.telebridge.domain.models.TelegramLink;
 
 public final class NameResolver {
     private final LinkRepository links;
@@ -9,10 +11,10 @@ public final class NameResolver {
         this.links = links;
     }
 
-    public String resolveEffective(String tgUsernameOrNull, String displayName) {
-        String linked = links.resolveMcFromTg(tgUsernameOrNull);
-        if (linked != null && !linked.isBlank()) return linked;
-        if (tgUsernameOrNull != null && !tgUsernameOrNull.isBlank()) return "@" + tgUsernameOrNull;
-        return (displayName != null && !displayName.isBlank()) ? displayName : "TG";
+    public String resolveEffective(TelegramInboundMessage in) {
+        TelegramLink linked = links.findByTg(in.userId, in.tgUsernameOrNull);
+        if (linked != null) return linked.mcName;
+        if (in.tgUsernameOrNull != null && !in.tgUsernameOrNull.isBlank()) return "@" + in.tgUsernameOrNull;
+        return (in.displayName != null && !in.displayName.isBlank()) ? in.displayName : "TG";
     }
 }
