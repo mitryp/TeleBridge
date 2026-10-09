@@ -1,7 +1,7 @@
 package dev.mitryp.telebridge.application.telegram;
 
 import com.mojang.logging.LogUtils;
-import dev.mitryp.telebridge.data.config.TelebridgeConfigHolder;
+import dev.mitryp.telebridge.domain.interfaces.ConfigProvider;
 import dev.mitryp.telebridge.domain.interfaces.TelegramCommand;
 import dev.mitryp.telebridge.domain.interfaces.TelegramGateway;
 import dev.mitryp.telebridge.domain.models.TelegramInboundMessage;
@@ -24,10 +24,12 @@ public final class InboundCommandRouter {
     private final Map<String, Registered> map = new LinkedHashMap<>();
     private final PendingPrompts prompts;
     private final TelegramGateway tg;
+    private final ConfigProvider cfgProvider;
 
-    public InboundCommandRouter(PendingPrompts prompts, TelegramGateway tg) {
+    public InboundCommandRouter(PendingPrompts prompts, TelegramGateway tg, ConfigProvider cfg) {
         this.prompts = prompts;
         this.tg = tg;
+        this.cfgProvider = cfg;
     }
 
     public InboundCommandRouter register(String name, String description, TelegramCommand handler) {
@@ -49,7 +51,7 @@ public final class InboundCommandRouter {
     }
 
     public void route(TelegramInboundMessage in, String botUsername) {
-        var cfg = TelebridgeConfigHolder.get();
+        var cfg = cfgProvider.get();
         String prefix = (cfg.inboundCmdPrefix == null || cfg.inboundCmdPrefix.isBlank()) ? "/" : cfg.inboundCmdPrefix;
         String text = in.text;
         if (text == null || text.isBlank()) return;

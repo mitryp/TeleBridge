@@ -22,13 +22,13 @@ public final class CommandMenu {
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
     private static final List<String> BROAD_SCOPES = List.of("default", "all_private_chats", "all_group_chats", "all_chat_administrators");
 
-    private final TelegramApi api;
+    private final BotApi api;
     private final ConfigProvider cfg;
     private final InboundCommandRouter router;
     private String publishedFor;
     private Set<Long> publishedAdmins = Set.of();
 
-    public CommandMenu(TelegramApi api, ConfigProvider cfg, InboundCommandRouter router) {
+    public CommandMenu(BotApi api, ConfigProvider cfg, InboundCommandRouter router) {
         this.api = api;
         this.cfg = cfg;
         this.router = router;

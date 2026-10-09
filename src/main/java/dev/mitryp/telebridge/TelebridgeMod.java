@@ -80,7 +80,7 @@ public class TelebridgeMod {
         PendingPrompts prompts = new PendingPrompts(telegram);
 
         // Commands available to Telegram
-        this.router = new InboundCommandRouter(prompts, telegram)
+        this.router = new InboundCommandRouter(prompts, telegram, TelebridgeConfigHolder::get)
                 .register("say", "Send a message to the Minecraft in-game chat", new SayCommand(mc, nameResolver, prompts))
                 .register("online", "Displays the current player list on the server", new OnlineCommand(mc, telegram))
                 .register("link", "Link your Telegram account to your Minecraft player (get a code with /tglink in game)",

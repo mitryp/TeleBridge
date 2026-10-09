@@ -17,7 +17,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-public final class TelegramApi {
+public final class TelegramApi implements BotApi {
     private static final Gson GSON = new Gson();
 
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
@@ -27,7 +27,7 @@ public final class TelegramApi {
         this.cfg = cfg;
     }
 
-    /** Calls a Bot API method and returns its {@code result}. */
+    @Override
     public JsonElement call(String method, Map<String, String> params, Duration timeout) throws IOException, InterruptedException {
         String token = cfg.get().telegramBotToken;
         HttpRequest req = HttpRequest.newBuilder(URI.create("https://api.telegram.org/bot" + token + "/" + method))
