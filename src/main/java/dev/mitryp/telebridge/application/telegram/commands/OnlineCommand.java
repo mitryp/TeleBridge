@@ -22,6 +22,6 @@ public final class OnlineCommand implements TelegramCommand {
         StringJoiner j = new StringJoiner("\n");
         j.add("Current online:");
         list.forEach(j::add);
-        tg.sendReply(j.toString(), in.replyMessageId, in.threadId);
+        tg.sendReply(j.toString(), in.messageId, in.threadId);
     }
 }

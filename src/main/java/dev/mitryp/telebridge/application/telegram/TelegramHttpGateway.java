@@ -1,139 +1,97 @@
 package dev.mitryp.telebridge.application.telegram;
 
-import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import dev.mitryp.telebridge.application.telegram.TelegramSender.Delete;
+import dev.mitryp.telebridge.application.telegram.TelegramSender.Text;
 import dev.mitryp.telebridge.domain.interfaces.ConfigProvider;
 import dev.mitryp.telebridge.domain.interfaces.TelegramGateway;
-import dev.mitryp.telebridge.domain.models.TelebridgeConfig;
 import dev.mitryp.telebridge.domain.models.TelegramInboundMessage;
-import dev.mitryp.telebridge.utils.Markdown;
 
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
-import java.util.concurrent.Executor;
+import java.time.Duration;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.function.Consumer;
+import java.util.function.IntConsumer;
 
 public final class TelegramHttpGateway implements TelegramGateway {
     private final ConfigProvider cfg;
-    private final Executor executor;
+    private final TelegramApi api;
+    private final TelegramSender sender;
     private volatile long offset = 0;
-    private static final Gson GSON = new Gson();
+    private String botUsernameToken;
+    private String botUsername;
 
-    public TelegramHttpGateway(ConfigProvider cfg, Executor executor) {
+    public TelegramHttpGateway(ConfigProvider cfg, TelegramApi api, TelegramSender sender) {
         this.cfg = cfg;
-        this.executor = executor;
+        this.api = api;
+        this.sender = sender;
     }
 
     @Override
     public void sendService(String plainText) {
-        var c = cfg.get();
-        if (!c.hasOutbound()) return;
-        executor.execute(() -> {
-            try {
-                sendTelegram(plainText, null, null);
-            } catch (Exception ignored) {
-            }
-        });
+        if (cfg.get().hasOutbound()) sender.enqueue(Text.service(plainText));
     }
 
     @Override
     public void sendReply(String plainText, Integer replyMessageId, Integer threadId) {
-        var c = cfg.get();
-        if (!c.hasOutbound()) return;
-        executor.execute(() -> {
-            try {
-                sendTelegram(plainText, replyMessageId, threadId);
-            } catch (Exception ignored) {
-            }
-        });
+        if (cfg.get().hasOutbound()) sender.enqueue(new Text(plainText, replyMessageId, threadId, null, null));
     }
 
     @Override
-    public void pollOnce(Consumer<TelegramInboundMessage> consumer) throws Exception {
+    public void sendPrompt(String plainText, String placeholder, Integer replyMessageId, Integer threadId, IntConsumer onSent) {
+        if (cfg.get().hasOutbound()) sender.enqueue(new Text(plainText, replyMessageId, threadId, placeholder, onSent));
+    }
+
+    @Override
+    public void delete(int messageId) {
+        if (cfg.get().hasOutbound()) sender.enqueue(new Delete(messageId));
+    }
+
+    @Override
+    public synchronized String botUsername() throws IOException, InterruptedException {
+        String token = cfg.get().telegramBotToken;
+        if (!token.equals(botUsernameToken)) {
+            botUsername = api.call("getMe", Map.of(), Duration.ofSeconds(10)).getAsJsonObject().get("username").getAsString();
+            botUsernameToken = token;
+        }
+        return botUsername;
+    }
+
+    @Override
+    public void pollOnce(Consumer<TelegramInboundMessage> consumer) throws IOException, InterruptedException {
         var c = cfg.get();
-        if (!c.inboundEnabled) return;
-        System.out.println("Starting single poll");
+        Map<String, String> params = new HashMap<>();
+        params.put("timeout", String.valueOf(c.inboundPollSeconds));
+        params.put("allowed_updates", "[\"message\"]");
+        if (offset > 0) params.put("offset", String.valueOf(offset));
 
-        String url = "https://api.telegram.org/bot" + c.telegramBotToken +
-                "/getUpdates?timeout=" + c.inboundPollSeconds + "&allowed_updates=message" +
-                (offset > 0 ? "&offset=" + offset : "");
+        JsonArray updates = api.call("getUpdates", params, Duration.ofSeconds(c.inboundPollSeconds + 10)).getAsJsonArray();
+        for (JsonElement el : updates) {
+            JsonObject up = el.getAsJsonObject();
+            offset = up.get("update_id").getAsLong() + 1;
+            if (!up.has("message")) continue;
 
-        HttpURLConnection conn = (HttpURLConnection) new java.net.URL(url).openConnection();
-        conn.setRequestMethod("GET");
-        conn.setConnectTimeout(5000);
-        conn.setReadTimeout((c.inboundPollSeconds + 5) * 1000);
+            JsonObject msg = up.getAsJsonObject("message");
+            if (!msg.has("text") || !msg.has("from")) continue;
 
-        int code = conn.getResponseCode();
-        if (code / 100 != 2) {
-            conn.disconnect();
-            return;
-        }
+            JsonObject chat = msg.getAsJsonObject("chat");
+            if (!String.valueOf(chat.get("id").getAsLong()).equals(c.telegramChatId)) continue;
 
-        try (var r = new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8)) {
-            JsonObject obj = GSON.fromJson(r, JsonObject.class);
-            if (obj == null || !obj.has("ok") || !obj.get("ok").getAsBoolean()) return;
-            JsonArray arr = obj.getAsJsonArray("result");
-            for (JsonElement el : arr) {
-                JsonObject up = el.getAsJsonObject();
-                offset = up.get("update_id").getAsLong() + 1;
-                if (!up.has("message")) continue;
+            JsonObject from = msg.getAsJsonObject("from");
+            String tgUser = from.has("username") ? from.get("username").getAsString() : null;
+            String display = (from.has("first_name") ? from.get("first_name").getAsString() : "TG") +
+                    (from.has("last_name") ? (" " + from.get("last_name").getAsString()) : "");
+            Integer threadId = msg.has("message_thread_id") ? msg.get("message_thread_id").getAsInt() : null;
+            Integer replyTo = msg.has("reply_to_message")
+                    ? msg.getAsJsonObject("reply_to_message").get("message_id").getAsInt()
+                    : null;
 
-                JsonObject msg = up.getAsJsonObject("message");
-                if (!msg.has("text")) continue;
-
-                JsonObject chat = msg.getAsJsonObject("chat");
-                String chatIdStr = chat.get("id").getAsLong() + "";
-                if (!chatIdStr.equals(c.telegramChatId)) continue;
-
-                String text = msg.get("text").getAsString();
-                JsonObject from = msg.getAsJsonObject("from");
-                String tgUser = from.has("username") ? from.get("username").getAsString() : null;
-                String display = (from.has("first_name") ? from.get("first_name").getAsString() : "TG") +
-                        (from.has("last_name") ? (" " + from.get("last_name").getAsString()) : "");
-                Integer messageId = msg.get("message_id").getAsInt();
-                Integer threadId = (msg.has("message_thread_id") ? msg.get("message_thread_id").getAsInt() : null);
-
-                consumer.accept(new TelegramInboundMessage(text, tgUser, display.trim(), messageId, threadId));
-            }
-        } finally {
-            conn.disconnect();
+            consumer.accept(new TelegramInboundMessage(
+                    msg.get("text").getAsString(), tgUser, display.trim(), from.get("id").getAsLong(),
+                    msg.get("message_id").getAsInt(), threadId, replyTo, msg.get("date").getAsLong()));
         }
     }
-
-    private void sendTelegram(String text, Integer replyMessageId, Integer threadId) throws IOException {
-        var c = cfg.get();
-        String url = "https://api.telegram.org/bot" + c.telegramBotToken + "/sendMessage";
-        String payload = buildBody(text, c.telegramUseMarkdownV2, c.telegramChatId, replyMessageId, threadId);
-
-        HttpURLConnection conn = (HttpURLConnection) new java.net.URL(url).openConnection();
-        conn.setRequestMethod("POST");
-        conn.setDoOutput(true);
-        conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
-        conn.setConnectTimeout(5000);
-        conn.setReadTimeout(8000);
-        conn.getOutputStream().write(payload.getBytes(StandardCharsets.UTF_8));
-        int code = conn.getResponseCode();
-        if (code / 100 != 2) {
-            // Swallow in production; could log or throw
-        }
-        conn.disconnect();
-    }
-
-    private static String buildBody(String text, boolean mdV2, String chatId, Integer replyId, Integer threadId) {
-        StringBuilder b = new StringBuilder();
-        b.append("chat_id=").append(URLEncoder.encode(chatId, StandardCharsets.UTF_8));
-        b.append("&text=").append(URLEncoder.encode(mdV2 ? Markdown.escapeV2ServiceAware(text) : text, StandardCharsets.UTF_8));
-        if (mdV2) b.append("&parse_mode=MarkdownV2&disable_web_page_preview=true");
-        if (replyId != null)
-            b.append("&reply_to_message_id=").append(replyId).append("&allow_sending_without_reply=true");
-        if (threadId != null) b.append("&message_thread_id=").append(threadId);
-        return b.toString();
-    }
-
-
 }

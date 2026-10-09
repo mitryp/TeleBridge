@@ -21,6 +21,7 @@ public final class TelebridgeSpec {
     static final ForgeConfigSpec.BooleanValue SERVICE_CHAT = B.comment("Forward chat").define("service.chat", true);
     static final ForgeConfigSpec.BooleanValue SERVICE_JOIN_QUIT = B.comment("Forward join/quit").define("service.join_quit", true);
     static final ForgeConfigSpec.BooleanValue SERVICE_DEATHS = B.comment("Forward deaths").define("service.deaths", true);
+    static final ForgeConfigSpec.BooleanValue SERVICE_ADVANCEMENTS = B.comment("Forward advancements").define("service.advancements", true);
     static final ForgeConfigSpec.BooleanValue SERVICE_START_STOP = B.comment("Forward start/stop").define("service.start_stop", true);
 
     // Inbound
