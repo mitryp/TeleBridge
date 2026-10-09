@@ -18,13 +18,13 @@ import java.util.function.IntConsumer;
 
 public final class TelegramHttpGateway implements TelegramGateway {
     private final ConfigProvider cfg;
-    private final TelegramApi api;
+    private final BotApi api;
     private final TelegramSender sender;
     private volatile long offset = 0;
     private String botUsernameToken;
     private String botUsername;
 
-    public TelegramHttpGateway(ConfigProvider cfg, TelegramApi api, TelegramSender sender) {
+    public TelegramHttpGateway(ConfigProvider cfg, BotApi api, TelegramSender sender) {
         this.cfg = cfg;
         this.api = api;
         this.sender = sender;

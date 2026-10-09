@@ -46,14 +46,14 @@ public final class TelegramSender {
     public record Delete(int messageId) implements Outbound {
     }
 
-    private final TelegramApi api;
+    private final BotApi api;
     private final ConfigProvider cfg;
     private final BlockingQueue<Outbound> queue = new LinkedBlockingQueue<>(1000);
     private Outbound carried;
     private Thread thread;
     private volatile boolean stopping;
 
-    public TelegramSender(TelegramApi api, ConfigProvider cfg) {
+    public TelegramSender(BotApi api, ConfigProvider cfg) {
         this.api = api;
         this.cfg = cfg;
     }

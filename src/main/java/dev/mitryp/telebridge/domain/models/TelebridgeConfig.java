@@ -14,7 +14,7 @@ public final class TelebridgeConfig {
     public final String inboundCmdPrefix;
     public final Set<Long> adminUserIds;
 
-    private TelebridgeConfig(boolean telegramEnabled, String bot, String chat, boolean mdv2,
+    public TelebridgeConfig(boolean telegramEnabled, String bot, String chat, boolean mdv2,
                              boolean serviceChat, boolean serviceJoinQuit, boolean serviceDeaths, boolean serviceAdvancements,
                              boolean serviceStartStop,
                              boolean inboundEnabled, int inboundPollSeconds, String inboundCmdPrefix,
