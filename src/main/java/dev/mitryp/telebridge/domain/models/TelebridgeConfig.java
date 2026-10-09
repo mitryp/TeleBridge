@@ -1,5 +1,8 @@
 package dev.mitryp.telebridge.domain.models;
 
+import java.util.Set;
+import java.util.stream.Collectors;
+
 public final class TelebridgeConfig {
     public final boolean telegramEnabled;
     public final String telegramBotToken;
@@ -9,11 +12,13 @@ public final class TelebridgeConfig {
     public final boolean inboundEnabled;
     public final int inboundPollSeconds;
     public final String inboundCmdPrefix;
+    public final Set<Long> adminUserIds;
 
     private TelebridgeConfig(boolean telegramEnabled, String bot, String chat, boolean mdv2,
                              boolean serviceChat, boolean serviceJoinQuit, boolean serviceDeaths, boolean serviceAdvancements,
                              boolean serviceStartStop,
-                             boolean inboundEnabled, int inboundPollSeconds, String inboundCmdPrefix) {
+                             boolean inboundEnabled, int inboundPollSeconds, String inboundCmdPrefix,
+                             Set<Long> adminUserIds) {
         this.telegramEnabled = telegramEnabled;
         this.telegramBotToken = bot;
         this.telegramChatId = chat;
@@ -26,6 +31,7 @@ public final class TelebridgeConfig {
         this.inboundEnabled = inboundEnabled;
         this.inboundPollSeconds = inboundPollSeconds;
         this.inboundCmdPrefix = inboundCmdPrefix;
+        this.adminUserIds = adminUserIds;
     }
 
     static TelebridgeConfig fromSpec() {
@@ -42,7 +48,8 @@ public final class TelebridgeConfig {
                 TelebridgeSpec.SERVICE_START_STOP.get(),
                 TelebridgeSpec.INBOUND_ENABLED.get(),
                 TelebridgeSpec.INBOUND_POLL_SECONDS.get(),
-                TelebridgeSpec.INBOUND_CMD_PREFIX.get()
+                TelebridgeSpec.INBOUND_CMD_PREFIX.get(),
+                TelebridgeSpec.ADMIN_USER_IDS.get().stream().map(Number::longValue).collect(Collectors.toUnmodifiableSet())
         );
     }
 
@@ -51,7 +58,8 @@ public final class TelebridgeConfig {
         return new TelebridgeConfig(
                 false, "PUT_YOUR_BOT_TOKEN_HERE", "PUT_YOUR_CHAT_ID_HERE", true,
                 true, true, true, true, true,
-                false, 20, "/"
+                false, 20, "/",
+                Set.of()
         );
     }
 

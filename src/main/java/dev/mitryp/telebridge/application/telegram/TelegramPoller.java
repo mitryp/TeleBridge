@@ -14,14 +14,16 @@ public final class TelegramPoller {
 
     private final TelegramGateway tg;
     private final InboundCommandRouter router;
+    private final CommandMenu menu;
     private final ConfigProvider cfg;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private volatile long startedAt;
     private Thread thread;
 
-    public TelegramPoller(TelegramGateway tg, InboundCommandRouter router, ConfigProvider cfg) {
+    public TelegramPoller(TelegramGateway tg, InboundCommandRouter router, CommandMenu menu, ConfigProvider cfg) {
         this.tg = tg;
         this.router = router;
+        this.menu = menu;
         this.cfg = cfg;
     }
 
@@ -49,6 +51,7 @@ public final class TelegramPoller {
                     continue;
                 }
                 String bot = tg.botUsername();
+                menu.publishIfChanged();
                 // Older messages were sent while the server was down, or were already handled before a restart.
                 tg.pollOnce(in -> {
                     if (in.date >= startedAt) router.route(in, bot);

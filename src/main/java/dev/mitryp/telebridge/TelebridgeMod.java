@@ -7,6 +7,7 @@ import dev.mitryp.telebridge.application.mc.commands.TgUnlinkCommand;
 import dev.mitryp.telebridge.application.mc.commands.TglinkCommand;
 import dev.mitryp.telebridge.application.services.LinkCodes;
 import dev.mitryp.telebridge.application.services.NameResolver;
+import dev.mitryp.telebridge.application.telegram.CommandMenu;
 import dev.mitryp.telebridge.application.telegram.InboundCommandRouter;
 import dev.mitryp.telebridge.application.telegram.PendingPrompts;
 import dev.mitryp.telebridge.application.telegram.TelegramApi;
@@ -15,7 +16,10 @@ import dev.mitryp.telebridge.application.telegram.TelegramPoller;
 import dev.mitryp.telebridge.application.telegram.TelegramSender;
 import dev.mitryp.telebridge.application.telegram.commands.LinkCommand;
 import dev.mitryp.telebridge.application.telegram.commands.OnlineCommand;
+import dev.mitryp.telebridge.application.telegram.commands.RestartCommand;
 import dev.mitryp.telebridge.application.telegram.commands.SayCommand;
+import dev.mitryp.telebridge.application.telegram.commands.ServerCommand;
+import dev.mitryp.telebridge.application.telegram.commands.TpsCommand;
 import dev.mitryp.telebridge.application.telegram.commands.UnlinkCommand;
 import dev.mitryp.telebridge.data.config.TelebridgeConfigHolder;
 import dev.mitryp.telebridge.data.repositories.JsonLinkRepository;
@@ -76,14 +80,20 @@ public class TelebridgeMod {
         PendingPrompts prompts = new PendingPrompts(telegram);
 
         // Commands available to Telegram
-        this.router = new InboundCommandRouter(prompts)
-                .register("say", new SayCommand(mc, nameResolver, prompts))
-                .register("online", new OnlineCommand(mc, telegram))
-                .register("link", new LinkCommand(links, linkCodes, mc, telegram, prompts))
-                .register("unlink", new UnlinkCommand(links, telegram));
+        this.router = new InboundCommandRouter(prompts, telegram)
+                .register("say", "Send a message to the Minecraft in-game chat", new SayCommand(mc, nameResolver, prompts))
+                .register("online", "Displays the current player list on the server", new OnlineCommand(mc, telegram))
+                .register("link", "Link your Telegram account to your Minecraft player (get a code with /tglink in game)",
+                        new LinkCommand(links, linkCodes, mc, telegram, prompts))
+                .register("unlink", "Unlink your Telegram account from your Minecraft player", new UnlinkCommand(links, telegram))
+                .registerAdmin("tps", "Admin: server TPS and tick time", new TpsCommand(mc, telegram))
+                .registerAdmin("kick", "Admin: kick a player (/kick <player> [reason])", ServerCommand.kick(mc, telegram))
+                .registerAdmin("keyauth", "Admin: /keyauth list, /keyauth reset <player>", ServerCommand.keyauth(mc, telegram))
+                .registerAdmin("save", "Admin: save the world", ServerCommand.save(mc, telegram))
+                .registerAdmin("restart", "Admin: restart the server (/restart confirm)", new RestartCommand(mc, telegram));
 
         // Inbound poller (Telegram -> MC)
-        this.poller = new TelegramPoller(telegram, router, TelebridgeConfigHolder::get);
+        this.poller = new TelegramPoller(telegram, router, new CommandMenu(api, TelebridgeConfigHolder::get, router), TelebridgeConfigHolder::get);
 
         // Event bus
         MinecraftForge.EVENT_BUS.register(this);
